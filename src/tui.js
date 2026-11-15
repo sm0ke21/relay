@@ -477,7 +477,7 @@ export class TUI {
     const model = [[cap(st?.model ? modelLabel(mid) : this.label(mid)), S(famColor(mid))]];
     const barW = Math.max(4, iw - 6);
     const f = Math.round((barW * pct) / 100);
-    const barColor = status === 'failed' ? C.red : status === 'done' ? C.green : status === 'escalated' ? C.purple : C.blue;
+    const barColor = status === 'failed' ? C.red : status === 'done' ? C.green : status === 'escalated' ? C.purple : color;
     const bar = [['█'.repeat(f), S(barColor)], ['░'.repeat(barW - f), S(C.faint)], [`${String(pct).padStart(4)}%`, S(C.text)]];
     const deps = t.deps.length ? `after ${t.deps.join(', ')}` : 'waiting';
     const activity = [[status === 'queued' ? deps : t.note || st?.activity || '', S(C.dim)]];

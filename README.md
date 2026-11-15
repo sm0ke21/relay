@@ -2,6 +2,10 @@
 
 A multi-agent harness for the `claude` CLI, with a full-screen TUI.
 
+![relay: an Opus lead fanning out to six Haiku workers, two of them escalating to Opus](docs/screenshot.png)
+
+<sub>Round 1 of a run (shown with simulated agents, <code>relay --mock</code>): t3 is done, t1 and the Opus-routed t5 are running, t2 is waiting on an Opus escalation, and t4/t6 are queued behind their dependencies.</sub>
+
 - **Opus leads.** It reads the repo, splits the goal into tasks with dependencies, then reviews and verifies the results. It can run follow-up rounds.
 - **Haiku swarms.** Workers run the tasks in parallel, each as its own `claude -p` process.
 - **Opus on call.** Every worker has an `escalate_to_opus` tool. A worker that gets stuck hands the problem up: `advise` gets read-only guidance back, `delegate` has Opus do the work. Each escalation shows up live in the diagram.
