@@ -29,6 +29,7 @@ _relay_run() {
     '*--allow[extra allowed tool rule]:rule:' \
     '--yolo[bypass permissions for workers]' \
     '--inherit-mcp[let agents load your MCP servers]' \
+    '*--mcp-config[give workers the MCP servers in this JSON file]:file:_files -g "*.json"' \
     '(-C --cwd)'{-C,--cwd}'[project directory]:dir:_directories' \
     '--out[report directory]:dir:_directories' \
     '--plain[no TUI, print the log]' \

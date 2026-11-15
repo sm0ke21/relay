@@ -2,8 +2,8 @@
 // diagram: lead -> fan-out -> workers (+ escalations) -> fan-in -> review.
 
 import os from 'node:os';
-import { Canvas, C, S, wrap, segLen } from './canvas.js';
-import { modelLabel, family, isTerminal } from './agent.js';
+import { Canvas, C, S, wrap, segLen, clean } from './canvas.js';
+import { modelLabel, family, isTerminal, toolCalls, parseMcp } from './agent.js';
 
 const SPIN = ['◐', '◓', '◑', '◒'];
 const EFFORT = { low: 1, medium: 2, high: 3, xhigh: 4, max: 5 };
@@ -17,6 +17,39 @@ const fmtTime = (ms) => {
 };
 const hhmmss = (t) => new Date(t).toTimeString().slice(0, 8);
 const colorOf = (name) => C[name] || C.text;
+// Stable colour per MCP server name. Avoids the role colours (blue, purple,
+// orange, green) and anything close to the red used for failures.
+const SERVER_PALETTE = ['#5fd7af', '#e6c27a', '#b5d98a', '#8ee3e3', '#d7b98e', '#e9a6d8'];
+// Colours are handed out in order of first appearance, so the first six
+// servers in a session never share one (hashing names caused collisions).
+const serverColors = new Map();
+const serverColor = (name = '') => {
+  if (!serverColors.has(name)) serverColors.set(name, SERVER_PALETTE[serverColors.size % SERVER_PALETTE.length]);
+  return serverColors.get(name);
+};
+// colour for a tool call by its tool name
+const toolColor = (name = '') => {
+  if (name.startsWith('mcp__relay')) return C.purple;
+  const mcp = parseMcp(name);
+  if (mcp) return serverColor(mcp.server);
+  if (name === 'StructuredOutput') return C.green;
+  return C.blue;
+};
+const fmtDur = (ms) => {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m${String(Math.round((ms % 60_000) / 1000)).padStart(2, '0')}s`;
+};
+
+// an agent's current activity, with the MCP server name (if any) in its colour
+const activitySegs = (st, fallback = '') => {
+  const text = st?.activity || fallback;
+  const mcp = st?.activityMcp;
+  if (mcp && text.startsWith(mcp.server))
+    return [[mcp.server, S(serverColor(mcp.server), { bold: true })], [text.slice(mcp.server.length), S(C.dim)]];
+  return [[text, S(C.dim)]];
+};
+
 const famColor = (id) => ({ opus: C.purple, haiku: C.blue, sonnet: C.orange, fable: C.yellow })[family(id)] || C.text;
 
 // box-drawing junction for a cell with connections up/down/left/right
@@ -36,6 +69,7 @@ export class TUI {
     this.sel = 0;
     this.detail = false;
     this.scroll = 0;
+    this.view = 'transcript'; // detail view: transcript | timeline
     this.tick = 0;
     this.flash = '';
     this.pending = false;
@@ -150,6 +184,10 @@ export class TUI {
       else if (s === '\x1b[6~' || s === ' ') this.scroll = Math.max(0, this.scroll - page);
       else if (s === 'g') this.scroll = 1e9;
       else if (s === 'G') this.scroll = 0;
+      else if (s === 't' || s === '\t') {
+        this.view = this.view === 'timeline' ? 'transcript' : 'timeline';
+        this.scroll = 0;
+      }
       return this.render();
     }
     const idle = !this.running();
@@ -426,7 +464,7 @@ export class TUI {
     const k = EFFORT[o.effort] || 3;
     const effort = [['effort ', S(C.dim)], ['▮'.repeat(k), S(C.orange)], ['▮'.repeat(5 - k), S(C.faint)], [` ${o.effort}`, S(C.orange)]];
     const foot = active && lead?.activity
-      ? [[lead.activity, S(C.dim)]]
+      ? activitySegs(lead)
       : [['--model ', S(C.dim)], [o.lead, S(C.text)]];
     const lines = h <= 3 ? [[...title, [' · ', S(C.dim)], ...phaseText]] : compact ? [title, phaseText] : [title, phaseText, effort, foot];
     lines.slice(0, h - 2).forEach((l, i) => cv.center(ix, y + 1 + i, iw, l));
@@ -443,8 +481,7 @@ export class TUI {
     const title = [['back to ', S(C.white, { bold: true })], [`${cap(this.label(this.opts.lead))} · lead`, S(C.orange, { bold: true })]];
     let status;
     if (active) {
-      const act = run.leadAgents.at(-1)?.state.activity || 'reviewing';
-      status = [[`${SPIN[this.tick % 4]} `, S(C.orange)], [act, S(C.text)]];
+      status = [[`${SPIN[this.tick % 4]} `, S(C.orange)], ...activitySegs(run.leadAgents.at(-1)?.state, 'reviewing')];
     } else if (phase === 'done') status = [['✓ ', S(C.green)], [run.verdict || 'done', S(C.green)]];
     else if (lastReview && !lastReview.done) status = [['→ ', S(C.orange)], [`${lastReview.followups?.length || 0} follow-ups · ${lastReview.verdict}`, S(C.orange)]];
     else if (phase === 'failed' || phase === 'aborted') status = [[phase, S(C.red)]];
@@ -480,7 +517,7 @@ export class TUI {
     const barColor = status === 'failed' ? C.red : status === 'done' ? C.green : status === 'escalated' ? C.purple : color;
     const bar = [['█'.repeat(f), S(barColor)], ['░'.repeat(barW - f), S(C.faint)], [`${String(pct).padStart(4)}%`, S(C.text)]];
     const deps = t.deps.length ? `after ${t.deps.join(', ')}` : 'waiting';
-    const activity = [[status === 'queued' ? deps : t.note || st?.activity || '', S(C.dim)]];
+    const activity = status === 'queued' || t.note ? [[status === 'queued' ? deps : t.note, S(C.dim)]] : activitySegs(st);
     const spin = SPIN[this.tick % 4];
     const cost = st?.cost ? ` · $${st.cost.toFixed(3)}` : '';
     const statusLine = {
@@ -507,8 +544,9 @@ export class TUI {
     const title = [[e.mode, S(C.purple, { bold: true })], [' · from ', S(C.dim)], [e.taskId, S(C.white)]];
     const q = [[e.question, S(C.text)]];
     const model = [[cap(modelLabel(st?.model || this.opts.escalate)), S(C.purple)]];
+    const act = activitySegs(st, 'thinking');
     const stl = status === 'running'
-      ? [[`${SPIN[this.tick % 4]} `, S(C.purple)], [st.activity || 'thinking', S(C.dim)]]
+      ? [[`${SPIN[this.tick % 4]} `, S(C.purple)], ...act]
       : status === 'done'
         ? [['✓ answered', S(C.green)], [` · $${st.cost.toFixed(3)}`, S(C.dim)]]
         : [[status, S(C.red)]];
@@ -565,7 +603,7 @@ export class TUI {
           [[`${run.rounds[0]?.ids.length || 0} tasks`, S(C.white)], [` · ${waves} wave${waves === 1 ? '' : 's'}`, S(C.dim)]],
           ...wrapK(run.plan.summary, C.dim, 3),
         ]);
-      } else if (planning) kids([[[`${SPIN[this.tick % 4]} `, S(C.orange)], [run.leadAgents.at(-1)?.state.activity || 'planning', S(C.dim)]]]);
+      } else if (planning) kids([[[`${SPIN[this.tick % 4]} `, S(C.orange)], ...activitySegs(run.leadAgents.at(-1)?.state, 'planning')]]);
       for (const r of run.rounds) {
         gap();
         const ts = run.tasks.filter((t) => t.round === r.n);
@@ -587,7 +625,7 @@ export class TUI {
               ...wrapK(r.review.verdict, r.review.done ? C.green : C.orange, 2),
               ...(r.review.done ? [] : [[[`→ ${r.review.followups?.length || 0} follow-ups`, S(C.orange)]]]),
             ]);
-          else kids([[[`${SPIN[this.tick % 4]} `, S(C.orange)], [run.leadAgents.at(-1)?.state.activity || 'verifying', S(C.dim)]]]);
+          else kids([[[`${SPIN[this.tick % 4]} `, S(C.orange)], ...activitySegs(run.leadAgents.at(-1)?.state, 'verifying')]]);
         }
       }
       if (['done', 'failed', 'aborted'].includes(run.phase)) {
@@ -707,20 +745,21 @@ export class TUI {
       name = `${it.e.id} · ${it.e.mode} from ${it.e.taskId}`;
     }
     const iw = W - 4;
-    const rows = [];
+    const timeline = this.view === 'timeline';
+    const rows = timeline ? this.timelineRows(agents, iw) : [];
     const add = (text, color, prefix = '', max = Infinity) => {
       const ls = wrap(text, iw - prefix.length);
       ls.slice(0, max).forEach((l, i) => rows.push([[i ? ' '.repeat(prefix.length) : prefix, S(color)], [l, S(color)]]));
       if (ls.length > max) rows.push([[' '.repeat(prefix.length) + `… ${ls.length - max} more lines`, S(C.faint)]]);
     };
-    if (it.kind === 'task' && !it.t.agent) add(it.t.prompt, C.text, '▌ ');
-    for (const a of agents) {
+    if (!timeline && it.kind === 'task' && !it.t.agent) add(it.t.prompt, C.text, '▌ ');
+    for (const a of timeline ? [] : agents) {
       const s = a.state;
       rows.push([[`━━ ${s.id}`, S(C.orange, { bold: true })], [` · ${modelLabel(s.model)} · ${s.status}`, S(C.dim)]]);
       for (const e of s.transcript) {
         if (e.kind === 'prompt') add(e.text, C.dim, '▌ ', 40);
         else if (e.kind === 'text') add(e.text, C.white);
-        else if (e.kind === 'tool') add(e.text, C.blue, '→ ', 6);
+        else if (e.kind === 'tool') add(e.text, toolColor(e.name), '→ ', 6);
         else if (e.kind === 'result') add(e.text, C.dim, '  ↳ ', 4);
         else if (e.kind === 'error') add(e.text, C.red, '  ✗ ', 6);
         else if (e.kind === 'final') {
@@ -730,7 +769,7 @@ export class TUI {
       }
       rows.push([['', '']]);
     }
-    if (it.kind === 'lead' && run.summary) {
+    if (!timeline && it.kind === 'lead' && run.summary) {
       rows.push([['━━ final summary', S(C.green, { bold: true })], [run.verdict ? ` · ${run.verdict}` : '', S(C.dim)]]);
       add(run.summary, C.white);
     }
@@ -743,6 +782,11 @@ export class TUI {
       [st?.status || 'queued', S(st?.status === 'done' ? C.green : st?.status === 'failed' ? C.red : C.blue)],
       [`  turns ${sum('turns')} · tools ${sum('tools')} · tokens ${fmtTok(sum('tokensIn'))} · $${sum('cost').toFixed(3)}`, S(C.dim)],
     ], W - 4);
+    // view tabs, right-aligned on the header line
+    cv.right(0, 0, W - 2, [
+      [' transcript ', timeline ? S(C.dim) : S(C.white, { bold: true, bg: C.hlbg })], [' ', ''],
+      [' timeline ', timeline ? S(C.white, { bold: true, bg: C.hlbg }) : S(C.dim)],
+    ]);
     cv.hline(1, 1, W - 2, '─', S(C.faint));
     const viewH = H - 4;
     const maxScroll = Math.max(0, rows.length - viewH);
@@ -751,8 +795,88 @@ export class TUI {
     rows.slice(start, start + viewH).forEach((r, i) => cv.segs(2, 2 + i, r, iw));
     cv.hline(1, H - 2, W - 2, '─', S(C.faint));
     cv.segs(2, H - 1, [
-      ['↑↓ scroll · PgUp/PgDn · g/G top/bottom · esc back', S(C.dim)],
+      [`t ${timeline ? 'transcript' : 'timeline'} · ↑↓ scroll · PgUp/PgDn · g/G top/bottom · esc back`, S(C.dim)],
       [this.scroll ? `   ${this.scroll} lines up` : '   following', S(C.faint)],
     ], W - 4);
+  }
+
+  // Gantt-style tool timeline: one row per call, bars placed on the agent's own clock.
+  timelineRows(agents, iw) {
+    const rows = [];
+    const now = Date.now();
+    const spin = SPIN[this.tick % 4];
+    for (const a of agents) {
+      const s = a.state;
+      const calls = toolCalls(s.transcript);
+      const t0 = s.startedAt || calls[0]?.start || now;
+      const t1 = s.endedAt || now;
+      const span = Math.max(1, t1 - t0);
+      const dur = (c) => (c.end ?? now) - c.start;
+      const busy = calls.reduce((n, c) => n + dur(c), 0);
+      const errors = calls.filter((c) => c.ok === false).length;
+
+      rows.push([
+        [`━━ ${s.id}`, S(C.orange, { bold: true })],
+        [` · ${modelLabel(s.model)} · ${s.status} · ${calls.length} call${calls.length === 1 ? '' : 's'} · ${fmtDur(busy)} in tools · ${fmtDur(span)} total`, S(C.dim)],
+        ...(errors ? [[` · ${errors} failed`, S(C.red, { bold: true })]] : []),
+      ]);
+      if (!calls.length) {
+        rows.push([['  no tool calls yet', S(C.dim)]], [['', '']]);
+        continue;
+      }
+
+      // per-tool totals, slowest first
+      const by = new Map();
+      for (const c of calls) {
+        const key = c.mcp ? `${c.mcp.server} · ${c.mcp.tool}` : c.name;
+        const g = by.get(key) || { key, name: c.name, n: 0, ms: 0, fail: 0 };
+        g.n++;
+        g.ms += dur(c);
+        if (c.ok === false) g.fail++;
+        by.set(key, g);
+      }
+      const groups = [...by.values()].sort((x, y) => y.ms - x.ms);
+      const summary = [['  ', '']];
+      groups.slice(0, 6).forEach((g, i) => {
+        if (i) summary.push(['  ', '']);
+        summary.push([g.key, S(toolColor(g.name))], [` ×${g.n} ${fmtDur(g.ms)}`, S(C.dim)]);
+        if (g.fail) summary.push([` ✗${g.fail}`, S(C.red)]);
+      });
+      if (groups.length > 6) summary.push([`  +${groups.length - 6} more`, S(C.faint)]);
+      rows.push(summary);
+
+      // columns: offset | bar | label | duration + mark
+      const offW = 8;
+      const barW = Math.max(12, Math.min(60, Math.floor(iw * 0.38)));
+      const durW = 9;
+      const labelW = Math.max(10, iw - offW - barW - durW - 6);
+      const axis = '├' + '─'.repeat(Math.max(0, barW - 2)) + '┤';
+      rows.push([
+        [' '.repeat(offW), ''], [axis, S(C.faint)], ['  ', ''],
+        ['0s', S(C.faint)], [` → ${fmtDur(span)}${s.endedAt ? '' : ' (live)'}`, S(C.faint)],
+      ]);
+      for (const c of calls) {
+        const sx = Math.min(barW - 1, Math.floor(((c.start - t0) / span) * barW));
+        const ex = Math.min(barW, Math.max(sx + 1, Math.ceil((((c.end ?? now) - t0) / span) * barW)));
+        const running = c.end == null;
+        const color = c.ok === false ? C.red : toolColor(c.name);
+        let label = clean(c.label);
+        if ([...label].length > labelW) label = [...label].slice(0, labelW - 1).join('') + '…';
+        const mark = running ? [spin, S(color)] : c.ok ? ['✓', S(C.green)] : ['✗', S(C.red, { bold: true })];
+        rows.push([
+          [`+${fmtDur(Math.max(0, c.start - t0))}`.padStart(offW - 1) + ' ', S(C.faint)],
+          [' '.repeat(sx), ''],
+          [(running ? '▒' : '█').repeat(ex - sx), S(color)],
+          [' '.repeat(barW - ex), ''],
+          ['  ', ''],
+          [label.padEnd(labelW), S(c.mcp ? serverColor(c.mcp.server) : c.ok === false ? C.red : C.text)],
+          [(running ? 'running' : fmtDur(dur(c))).padStart(durW - 2) + ' ', S(C.dim)],
+          mark,
+        ]);
+      }
+      rows.push([['', '']]);
+    }
+    if (!agents.length) rows.push([['  not started yet', S(C.dim)]]);
+    return rows;
   }
 }

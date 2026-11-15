@@ -50,6 +50,8 @@ permissions (workers)
   --allow <rule>           extra allowed tool rule, repeatable, e.g. --allow "Bash(npm test:*)"
   --yolo                   bypassPermissions for workers (sandboxes only!)
   --inherit-mcp            let agents load your MCP servers (default: isolated)
+  --mcp-config <file>      give workers the MCP servers in this JSON file (repeatable);
+                           their tools are allowed automatically
 
 misc
   -C, --cwd <dir>          project directory             (default: .)
@@ -63,7 +65,8 @@ misc
 
 keys
   tab / arrows   select lead, worker or escalation
-  enter          start the typed task, or open the selected transcript
+  enter          start the typed task, or open the selected agent
+  t              in an agent's view: switch between transcript and tool timeline
   d / ctrl-d     detach (the session keeps running)
   q              abort the current run      ctrl-c   abort, then end the session
 `;
@@ -74,7 +77,7 @@ function parse(argv) {
     concurrency: 4, rounds: 3, maxTasks: 8, maxEscalations: 6, budget: 0,
     permissionMode: 'acceptEdits', allow: [], yolo: false, inheritMcp: false,
     cwd: process.cwd(), outDir: '', plain: !process.stdout.isTTY, mock: false, keepSessions: false,
-    detach: false, idleTimeout: 24,
+    detach: false, idleTimeout: 24, mcpServers: null,
   };
   const rest = [];
   const num = (v, k) => {
@@ -101,6 +104,20 @@ function parse(argv) {
       case '--allow': o.allow.push(val()); break;
       case '--yolo': o.yolo = true; break;
       case '--inherit-mcp': o.inheritMcp = true; break;
+      case '--mcp-config': {
+        const file = val();
+        let cfg;
+        try {
+          cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+        } catch (e) {
+          die(`--mcp-config ${file}: ${e.message}`);
+        }
+        const servers = cfg.mcpServers || cfg;
+        if (!servers || typeof servers !== 'object' || Array.isArray(servers)) die(`--mcp-config ${file}: expected {"mcpServers": {...}}`);
+        if (servers.relay) die(`--mcp-config ${file}: the server name "relay" is reserved`);
+        o.mcpServers = { ...(o.mcpServers || {}), ...servers };
+        break;
+      }
       case '-C': case '--cwd': o.cwd = path.resolve(val()); break;
       case '--out': o.outDir = path.resolve(val()); break;
       case '--plain': o.plain = true; break;

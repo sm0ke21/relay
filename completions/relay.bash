@@ -3,7 +3,7 @@ _relay() {
   local cur=${COMP_WORDS[COMP_CWORD]}
   if (( COMP_CWORD == 1 )); then
     if [[ $cur == -* ]]; then
-      COMPREPLY=($(compgen -W "--lead --worker --escalate --effort --concurrency --rounds --max-tasks --max-escalations --budget --permission-mode --allow --yolo --inherit-mcp --cwd --out --plain --mock --keep-sessions --detach --idle-timeout --help" -- "$cur"))
+      COMPREPLY=($(compgen -W "--lead --worker --escalate --effort --concurrency --rounds --max-tasks --max-escalations --budget --permission-mode --allow --yolo --inherit-mcp --mcp-config --cwd --out --plain --mock --keep-sessions --detach --idle-timeout --help" -- "$cur"))
     else
       COMPREPLY=($(compgen -W "attach ls logs kill completion" -- "$cur"))
     fi

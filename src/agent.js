@@ -23,6 +23,38 @@ const short = (s, n = 70) => {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 };
 
+// mcp__github__create_issue -> { server: 'github', tool: 'create_issue' }
+export function parseMcp(name = '') {
+  const m = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (!m) return null;
+  return { server: m[1].replace(/^claude_ai_/, ''), tool: m[2] };
+}
+
+// The one or two arguments that say the most about a call, e.g. repo=relay title="Fix race"
+const ARG_PRIORITY = [
+  'query', 'q', 'sql', 'command', 'path', 'file_path', 'file', 'url', 'title', 'name', 'subject',
+  'city', 'repo', 'issue_number', 'number', 'id', 'channel', 'pattern', 'to', 'owner', 'text', 'message',
+];
+export function summarizeArgs(input, max = 2) {
+  if (!input || typeof input !== 'object') return '';
+  const scalars = Object.entries(input).filter(
+    ([, v]) => v != null && v !== '' && ['string', 'number', 'boolean'].includes(typeof v),
+  );
+  const rank = (k) => {
+    const i = ARG_PRIORITY.indexOf(k);
+    return i < 0 ? 99 : i;
+  };
+  return scalars
+    .sort((a, b) => rank(a[0]) - rank(b[0]))
+    .slice(0, max)
+    .map(([k, v]) => {
+      let s = String(v).replace(/\s+/g, ' ').trim();
+      if (s.length > 28) s = s.slice(0, 27) + '…';
+      return `${k}=${typeof v === 'string' && /\s/.test(s) ? `"${s}"` : s}`;
+    })
+    .join(' ');
+}
+
 export function describeTool(name, input = {}) {
   const base = (p) => (p ? path.basename(String(p)) : '');
   switch (name) {
@@ -40,8 +72,42 @@ export function describeTool(name, input = {}) {
     case 'TodoWrite': return 'TodoWrite';
     case 'StructuredOutput': return 'StructuredOutput';
     case 'mcp__relay__escalate_to_opus': return `⇡ escalate (${input.mode || 'advise'})`;
-    default: return name.replace(/^mcp__/, '');
+    default: {
+      const mcp = parseMcp(name);
+      if (!mcp) return name;
+      const args = summarizeArgs(input);
+      return `${mcp.server} · ${mcp.tool}${args ? ' ' + args : ''}`;
+    }
   }
+}
+
+// Pair tool_use entries with their results: [{ id, name, label, mcp, start, end, ok }]
+// end is null while the call is still running.
+export function toolCalls(transcript = []) {
+  const calls = [];
+  const byId = new Map();
+  for (const e of transcript) {
+    if (e.kind === 'tool' && e.toolUseId) {
+      const c = {
+        id: e.toolUseId,
+        name: e.name || '',
+        label: String(e.text || '').split('\n')[0],
+        mcp: e.name && !e.name.startsWith('mcp__relay') ? parseMcp(e.name) : null,
+        start: e.t,
+        end: null,
+        ok: null,
+      };
+      calls.push(c);
+      byId.set(c.id, c);
+    } else if ((e.kind === 'result' || e.kind === 'error') && e.toolUseId) {
+      const c = byId.get(e.toolUseId);
+      if (c && c.end == null) {
+        c.end = e.t;
+        c.ok = e.kind === 'result';
+      }
+    }
+  }
+  return calls;
 }
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled', 'skipped']);
@@ -72,6 +138,7 @@ export class Agent extends EventEmitter {
       tokensOut: 0,
       cost: 0,
       activity: '',
+      activityMcp: null,
       transcript: [{ kind: 'prompt', text: o.prompt, t: Date.now() }],
       result: '',
       structured: null,
@@ -83,9 +150,9 @@ export class Agent extends EventEmitter {
     };
   }
 
-  push(kind, text) {
+  push(kind, text, extra = {}) {
     const tr = this.state.transcript;
-    tr.push({ kind, text: String(text ?? ''), t: Date.now() });
+    tr.push({ kind, text: String(text ?? ''), t: Date.now(), ...extra });
     if (tr.length > 3000) {
       // keep the prompt; drop the oldest entries after it
       const n = tr.length - 3000;
@@ -233,12 +300,15 @@ export class Agent extends EventEmitter {
           if (b.type === 'text' && b.text?.trim()) {
             this.push('text', b.text);
             st.activity = short(b.text, 60);
+            st.activityMcp = null;
           } else if (b.type === 'tool_use') {
             st.tools++;
             const d = describeTool(b.name, b.input);
             st.activity = d;
-            if (b.name === 'StructuredOutput') this.push('tool', 'StructuredOutput');
-            else this.push('tool', `${d}${b.name.startsWith('mcp__relay') ? '\n' + short(b.input?.question, 400) : ''}`);
+            st.activityMcp = b.name.startsWith('mcp__relay') ? null : parseMcp(b.name);
+            const tag = { toolUseId: b.id, name: b.name };
+            if (b.name === 'StructuredOutput') this.push('tool', 'StructuredOutput', tag);
+            else this.push('tool', `${d}${b.name.startsWith('mcp__relay') ? '\n' + short(b.input?.question, 400) : ''}`, tag);
             this.emit('tool', b.name, b.input);
           } else if (b.type === 'thinking' && b.thinking) {
             st.activity = 'thinking';
@@ -253,7 +323,7 @@ export class Agent extends EventEmitter {
           if (b.type !== 'tool_result') continue;
           let text = b.content;
           if (Array.isArray(text)) text = text.map((x) => x.text || '').join('\n');
-          this.push(b.is_error ? 'error' : 'result', String(text ?? '').slice(0, 1500));
+          this.push(b.is_error ? 'error' : 'result', String(text ?? '').slice(0, 1500), { toolUseId: b.tool_use_id });
         }
         break;
       }

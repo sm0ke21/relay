@@ -6,7 +6,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Agent, isTerminal, modelLabel } from './agent.js';
+import { Agent, isTerminal, modelLabel, toolCalls } from './agent.js';
 import { MockAgent } from './mock.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -130,8 +130,13 @@ export class Orchestrator extends EventEmitter {
     if (this.o.yolo) return { permissionMode: 'bypassPermissions', allowedTools: [] };
     return {
       permissionMode: this.o.permissionMode || 'acceptEdits',
-      allowedTools: [...READ_ONLY, 'mcp__relay__escalate_to_opus', ...(this.o.allow || [])],
+      allowedTools: [...READ_ONLY, 'mcp__relay__escalate_to_opus', ...this.userMcpAllow(), ...(this.o.allow || [])],
     };
+  }
+
+  // servers given with --mcp-config: the user named them, so their tools are allowed
+  userMcpAllow() {
+    return Object.keys(this.o.mcpServers || {}).map((name) => `mcp__${name}`);
   }
 
   // ── escalation socket ─────────────────────────────────────────────────
@@ -203,6 +208,7 @@ export class Orchestrator extends EventEmitter {
       permissionMode: advise ? undefined : perms.permissionMode,
       allowedTools: advise ? READ_ONLY : perms.allowedTools.filter((t) => !t.startsWith('mcp__relay')),
       strictMcp: !this.o.inheritMcp,
+      mcpConfig: !advise && this.o.mcpServers && !this.o.mock ? { mcpServers: this.o.mcpServers } : undefined,
     });
     if (task) task.escalations.push(id);
     run.escalations.push(esc);
@@ -368,6 +374,7 @@ export class Orchestrator extends EventEmitter {
         ? undefined
         : {
             mcpServers: {
+              ...(this.o.mcpServers || {}),
               relay: {
                 command: process.execPath,
                 args: [MCP_SERVER],
@@ -526,7 +533,28 @@ export class Orchestrator extends EventEmitter {
       `## Escalations\n\n` +
         (run.escalations.map((e) => `- **${e.id}** from ${e.taskId} (${e.mode}): ${e.question}\n  - → ${clip(e.agent?.state.result || e.agent?.state.error, 800).replace(/\n/g, '\n    ')}`).join('\n') || '_none_'),
       `## Agents\n\n| id | role | model | status | turns | tools | tok in | tok out | cost | time |\n|---|---|---|---|---|---|---|---|---|---|\n${this.agents.map(row).join('\n')}`,
-      `## Worker reports\n\n` + run.tasks.map((t) => `### ${t.id} · ${t.title}\n\n${t.agent?.state.result || t.agent?.state.error || t.note || '_no output_'}`).join('\n\n'),
+      `## Tool calls\n\n` +
+        (this.agents
+          .map((a) => {
+            const calls = toolCalls(a.state.transcript);
+            if (!calls.length) return '';
+            const by = {};
+            for (const c of calls) {
+              const k = c.mcp ? `${c.mcp.server}·${c.mcp.tool}` : c.name;
+              const g = (by[k] ||= { n: 0, ms: 0, fail: 0 });
+              g.n++;
+              g.ms += (c.end ?? c.start) - c.start;
+              if (c.ok === false) g.fail++;
+            }
+            const parts = Object.entries(by)
+              .sort((x, y) => y[1].ms - x[1].ms)
+              .map(([k, g]) => `${k} ×${g.n} (${(g.ms / 1000).toFixed(1)}s${g.fail ? `, ${g.fail} failed` : ''})`);
+            return `- **${a.state.id}**: ${parts.join(', ')}`;
+          })
+          .filter(Boolean)
+          .join('\n') || '_none_') +
+        '\n\n' +
+        `## Worker reports\n\n` + run.tasks.map((t) => `### ${t.id} · ${t.title}\n\n${t.agent?.state.result || t.agent?.state.error || t.note || '_no output_'}`).join('\n\n'),
     ].join('\n\n');
     const p = path.join(this.runDir, 'report.md');
     fs.writeFileSync(p, md + '\n');

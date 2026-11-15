@@ -123,6 +123,7 @@ In the TUI, `ctrl-c` aborts the run; pressing it again ends the session. Session
 | `--allow <rule>` | | repeatable, e.g. `--allow "Bash(npm test:*)"`. Also gives the reviewer Bash |
 | `--yolo` | off | bypassPermissions for workers (sandboxes only) |
 | `--inherit-mcp` | off | agents load your MCP servers (by default they are isolated, which is faster) |
+| `--mcp-config <file>` | | repeatable; gives workers the MCP servers in this JSON file (`{"mcpServers": {...}}`), with their tools allowed |
 | `-C, --cwd`, `--out`, `--keep-sessions`, `--plain`, `--mock` | | |
 
 Workers can edit files without asking (`acceptEdits`), but shell commands are denied unless you allow them with `--allow`. Without that, nobody can run tests. Typical usage:
@@ -131,8 +132,28 @@ Workers can edit files without asking (`acceptEdits`), but shell commands are de
 relay --allow "Bash(npm test:*)" --allow "Bash(git diff:*)" "fix the flaky auth tests"
 ```
 
+## Tool calls and MCP
+
+Every tool call an agent makes is tracked from start to result:
+
+![relay's tool timeline: one row per tool call, MCP servers in their own colours, failed calls in red](docs/timeline.png)
+
+- **Worker boxes** show the current call. MCP calls are labelled `server · tool key-args` (e.g. `github · create_issue title="Fix race" repo=api`), and each server name gets its own colour.
+- **Tool timeline:** open an agent (`enter`) and press `t`. Each call is a bar on the agent's own clock, with its duration and ✓/✗. Calls still running are shaded, and a summary line shows totals per tool, slowest first.
+- **Reports** list each agent's tool calls with counts, total time and failures.
+
+To try it with a real MCP server, use the bundled demo server. All its data is made up, and its tools take different amounts of time; one always fails:
+
+```
+node examples/demo-mcp.js --config > /tmp/demo-mcp.json
+relay --mcp-config /tmp/demo-mcp.json \
+  "Use the demo MCP tools: get the forecast for Athens, search the docs for 'token refresh', run slow_job for 3 seconds and call always_fails once. Then summarise the results in mcp-test.md."
+```
+
+`relay --mock` also includes fake `github`, `linear` and `postgres` calls, so you can see the labels and timeline for free.
+
 ## Keys
 
-`tab`/arrows select the lead, a worker or an escalation · `enter` starts the typed task or opens the selected agent's transcript (↑↓ PgUp/PgDn g/G, esc to go back) · `d`/`ctrl-d` detaches · `q` aborts the run · `ctrl-c` aborts, then ends the session.
+`tab`/arrows select the lead, a worker or an escalation · `enter` starts the typed task or opens the selected agent's transcript (↑↓ PgUp/PgDn g/G, esc to go back) · `t` in that view switches to the tool timeline · `d`/`ctrl-d` detaches · `q` aborts the run · `ctrl-c` aborts, then ends the session.
 
 At least 100×30 is recommended. Below that the layout shrinks step by step and pages through worker rows.

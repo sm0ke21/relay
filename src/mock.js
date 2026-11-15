@@ -1,7 +1,7 @@
 // Simulated agents for `relay --mock`: exercises the whole pipeline and TUI
 // without spending tokens.
 
-import { Agent } from './agent.js';
+import { Agent, describeTool, parseMcp } from './agent.js';
 
 const MODEL = { opus: 'claude-opus-5-5', haiku: 'claude-haiku-5-5', sonnet: 'claude-sonnet-5-5' };
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -9,12 +9,17 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const FILES = ['src/auth.ts', 'src/session.ts', 'lib/db.js', 'api/routes.ts', 'test/auth.test.ts', 'README.md', 'package.json'];
+// [name, input, [minMs, maxMs], failure rate]
 const STEPS = [
-  () => ['Read', { file_path: pick(FILES) }],
-  () => ['Grep', { pattern: pick(['refreshToken', 'export function', 'TODO', 'sourceMap']) }],
-  () => ['Glob', { pattern: pick(['src/**/*.ts', '**/*.test.ts', 'lib/*']) }],
-  () => ['Edit', { file_path: pick(FILES) }],
-  () => ['Bash', { command: pick(['npm test -- auth', 'git diff --stat', 'tsc --noEmit']) }],
+  () => ['Read', { file_path: pick(FILES) }, [60, 300], 0],
+  () => ['Grep', { pattern: pick(['refreshToken', 'export function', 'TODO', 'sourceMap']) }, [80, 400], 0],
+  () => ['Glob', { pattern: pick(['src/**/*.ts', '**/*.test.ts', 'lib/*']) }, [50, 200], 0],
+  () => ['Edit', { file_path: pick(FILES) }, [100, 350], 0.05],
+  () => ['Bash', { command: pick(['npm test -- auth', 'git diff --stat', 'tsc --noEmit']) }, [900, 3200], 0.25],
+  // fake MCP servers, so labels and colours can be tried without real ones
+  () => ['mcp__github__get_issue', { owner: 'acme', repo: 'api', issue_number: pick([412, 418, 431]) }, [400, 1400], 0.1],
+  () => ['mcp__linear__search_issues', { query: pick(['token refresh', 'logout race', 'session expiry']) }, [500, 1800], 0],
+  () => ['mcp__postgres__query', { sql: pick(['select count(*) from sessions', 'select * from tokens where revoked']) }, [200, 2200], 0.15],
 ];
 
 export class MockAgent extends Agent {
@@ -42,17 +47,22 @@ export class MockAgent extends Agent {
     st.cost += (this.o.model.includes('opus') ? 0.012 : 0.0015) * k * rnd(0.6, 1.4);
   }
 
-  tool(name, input) {
+  // start a tool call; returns its id so the result can be paired with it
+  tool(name, input, text) {
+    const id = `mock_${++this._seq || (this._seq = 1)}`;
     this.state.tools++;
-    const d = this.describe(name, input);
+    const d = describeTool(name, input);
     this.state.activity = d;
-    this.push('tool', d);
+    this.state.activityMcp = name.startsWith('mcp__relay') ? null : parseMcp(name);
+    this.push('tool', text || d, { toolUseId: id, name });
     this.usage();
     this.changed();
+    return id;
   }
 
-  describe(name, input) {
-    return name === 'Bash' ? `$ ${input.command}` : `${name} ${input.file_path || input.pattern || ''}`.trim();
+  toolResult(id, ok, text) {
+    this.push(ok ? 'result' : 'error', text, { toolUseId: id });
+    this.changed();
   }
 
   async sim() {
@@ -66,24 +76,25 @@ export class MockAgent extends Agent {
 
     const n = o.role === 'lead' ? Math.round(rnd(3, 6)) : Math.round(rnd(4, 10));
     for (let i = 0; i < n; i++) {
-      await this.step(rnd(fast ? 350 : 600, fast ? 1100 : 1600));
+      await this.step(rnd(fast ? 150 : 400, fast ? 600 : 1000)); // thinking between calls
       if (o.role === 'worker' && i === 2 && o.onEscalate && Math.random() < 0.45) {
         const q = pick([
           'Token refresh races with logout; which lock order is safe?',
           'Two failing tests contradict each other. Which one encodes the intended behaviour?',
           'Is it safe to drop the legacy session table, or do migrations still read it?',
         ]);
-        this.tool('mcp__relay__escalate_to_opus', {});
-        st.activity = '⇡ escalate (advise)';
-        this.push('tool', `⇡ escalate (advise)\n${q}`);
-        this.changed();
-        const ans = await o.onEscalate({ question: q, context: '', mode: Math.random() < 0.3 ? 'delegate' : 'advise' });
+        const mode = Math.random() < 0.3 ? 'delegate' : 'advise';
+        const id = this.tool('mcp__relay__escalate_to_opus', { mode }, `⇡ escalate (${mode})\n${q}`);
+        const ans = await o.onEscalate({ question: q, context: '', mode });
         if (this._killed) throw new Error('cancelled');
-        this.push('result', ans.text);
+        this.toolResult(id, !ans.isError, ans.text);
         continue;
       }
-      const [name, input] = pick(STEPS)();
-      this.tool(name, input);
+      const [name, input, [lo, hi], failRate] = pick(STEPS)();
+      const id = this.tool(name, input);
+      await this.step(rnd(lo, hi));
+      const ok = Math.random() >= failRate;
+      this.toolResult(id, ok, ok ? `ok (${name})` : name === 'Bash' ? 'exit 1: 2 tests failed' : 'error: upstream returned 502');
     }
     await this.step(rnd(300, 800));
 
