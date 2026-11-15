@@ -3,8 +3,27 @@
   "version": "0.1.0",
   "description": "Multi-agent harness for the claude CLI: Opus leads, Haiku swarms, Opus on call",
   "type": "module",
-  "bin": { "relay": "bin/relay.js" },
-  "engines": { "node": ">=20" },
-  "scripts": { "demo": "node bin/relay.js --mock" },
-  "license": "MIT"
+  "bin": {
+    "relay": "bin/relay.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "demo": "node bin/relay.js --mock"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sm0ke21/relay.git"
+  },
+  "homepage": "https://github.com/sm0ke21/relay",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "multi-agent",
+    "orchestration",
+    "tui",
+    "cli"
+  ]
 }
