@@ -29,6 +29,17 @@ relay kill <id> | --all     # end sessions (aborts running agents)
 
 You can close the terminal or log out and the agents keep working. Several clients can be attached to one session at once. When a run finishes, the session stays up, idle, so you can attach later, read transcripts and give it another task. After `--idle-timeout` hours (default 24) with nobody attached, it exits. Once a session is gone, `relay ls` still lists its run and report.
 
+### Shell completion
+
+`relay attach <TAB>` completes live session ids and shows each one's phase, goal and directory. `logs`, `kill`, subcommands, flags and model names complete too.
+
+```
+# zsh (oh-my-zsh: any dir on $fpath works, e.g. ~/.oh-my-zsh/custom/completions)
+relay completion zsh > ~/.oh-my-zsh/custom/completions/_relay && exec zsh
+# bash
+echo 'eval "$(relay completion bash)"' >> ~/.bashrc
+```
+
 In the TUI, `ctrl-c` aborts the run; pressing it again ends the session. Session state is stored in `${XDG_STATE_HOME:-~/.local/state}/relay/` (override with `RELAY_STATE_DIR`), and each session's server log is there too.
 
 ## How it works

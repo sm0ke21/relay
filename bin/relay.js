@@ -2,6 +2,7 @@
 // relay — Opus leads, Haiku swarms, Opus on call.
 
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Orchestrator } from '../src/orchestrator.js';
@@ -20,6 +21,7 @@ usage: relay [options] [task...]       start a session and attach to it
        relay ls                          live sessions + recently finished runs
        relay logs [id] [-f]              print a session's log (-f: follow)
        relay kill <id>|--all             end sessions (aborts running agents)
+       relay completion zsh|bash         print a shell completion script
        echo "task" | relay --plain       no session, no TUI, log to stdout
 
 Runs live in a background session: press d (or ctrl-d) to detach, close the
@@ -287,9 +289,27 @@ async function attachTUI(id, fresh) {
   if (!fresh) tui.flash = `attached to ${remote.id} · d / ^D detaches`;
 }
 
+function cmdCompletion(shell) {
+  const file = { zsh: '_relay', bash: 'relay.bash' }[shell];
+  if (!file) die('usage: relay completion zsh|bash');
+  process.stdout.write(fs.readFileSync(new URL(`../completions/${file}`, import.meta.url), 'utf8'));
+}
+
+// Machine-readable session list for shell completion; must stay fast and quiet.
+function cmdComplete(what) {
+  const live = listSessions();
+  for (const s of live) {
+    if (what === 'ids') console.log(s.id);
+    else {
+      const desc = `${s.phase}${s.clients ? ' · attached' : ''} · ${short(s.goal || '(idle)', 50)} · ${tilde(s.cwd)}`;
+      console.log(`${s.id}:${desc.replace(/[\r\n]+/g, ' ')}`);
+    }
+  }
+}
+
 // ── main ──────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
-const SUB = { attach: 1, a: 1, ls: 1, list: 1, logs: 1, kill: 1, __serve: 1 };
+const SUB = { attach: 1, a: 1, ls: 1, list: 1, logs: 1, kill: 1, completion: 1, __serve: 1, __complete: 1 };
 
 if (SUB[argv[0]]) {
   const [sub, ...args] = argv;
@@ -298,6 +318,8 @@ if (SUB[argv[0]]) {
   else if (sub === 'ls' || sub === 'list') await cmdLs();
   else if (sub === 'logs') await cmdLogs(args);
   else if (sub === 'kill') await cmdKill(args);
+  else if (sub === 'completion') cmdCompletion(args[0]);
+  else if (sub === '__complete') cmdComplete(args[0]);
 } else {
   const { o, goal: argGoal } = parse(argv);
   if (!o.mock) checkClaude();

@@ -258,6 +258,7 @@ class SessionServer {
       this.writeMeta(true);
     });
     orch.start(goal);
+    this.writeMeta(true);
     this.dirty();
   }
 
@@ -331,7 +332,7 @@ class SessionServer {
       pid: process.pid,
       cwd: this.opts.cwd,
       goal: r?.goal || '',
-      phase: r?.phase || 'idle',
+      phase: !r ? 'idle' : r.phase === 'idle' ? 'starting' : r.phase,
       verdict: r?.verdict || '',
       cost: this.orch?.cost || 0,
       runs: this.runSeq,

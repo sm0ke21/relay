@@ -1,0 +1,71 @@
+#compdef relay
+# zsh completion for relay. Install: relay completion zsh > "${fpath[1]}/_relay"
+# (or any dir on $fpath), then restart zsh.
+
+_relay_sessions() {
+  local -a sessions
+  sessions=(${(f)"$(relay __complete sessions 2>/dev/null)"})
+  (( ${#sessions} )) || { _message 'no live relay sessions'; return 1 }
+  _describe -V -t sessions 'relay session' sessions
+}
+
+_relay_models() {
+  local -a models=(opus sonnet haiku fable)
+  _describe -t models model models
+}
+
+_relay_run() {
+  _arguments -s -S \
+    '--lead[orchestrator model]:model:_relay_models' \
+    '--worker[worker model]:model:_relay_models' \
+    '--escalate[model workers escalate to]:model:_relay_models' \
+    '--effort[lead/escalation effort]:level:(low medium high xhigh max)' \
+    '(-j --concurrency)'{-j,--concurrency}'[parallel workers]:n:' \
+    '--rounds[max plan/review rounds]:n:' \
+    '--max-tasks[max tasks per round]:n:' \
+    '--max-escalations[max escalations per run]:n:' \
+    '--budget[stop dispatching past this spend (USD)]:usd:' \
+    '--permission-mode[worker permission mode]:mode:(acceptEdits auto bypassPermissions manual dontAsk plan)' \
+    '*--allow[extra allowed tool rule]:rule:' \
+    '--yolo[bypass permissions for workers]' \
+    '--inherit-mcp[let agents load your MCP servers]' \
+    '(-C --cwd)'{-C,--cwd}'[project directory]:dir:_directories' \
+    '--out[report directory]:dir:_directories' \
+    '--plain[no TUI, print the log]' \
+    '--mock[simulated agents]' \
+    '--keep-sessions[persist claude sessions]' \
+    '(-d --detach)'{-d,--detach}'[start in the background]' \
+    '--idle-timeout[hours before an idle session exits]:hours:' \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '*:task:_guard "^-*" task'
+}
+
+_relay() {
+  if (( CURRENT == 2 )) && [[ $PREFIX != -* ]]; then
+    local -a cmds=(
+      'attach:re-attach to a session'
+      'ls:list live sessions and recent runs'
+      'logs:print a session log'
+      'kill:end sessions'
+      'completion:print a shell completion script'
+    )
+    _describe -t commands 'relay command' cmds
+    return
+  fi
+  case $words[2] in
+    attach|a)
+      (( CURRENT == 3 )) && _relay_sessions ;;
+    logs)
+      shift words; (( CURRENT-- ))
+      _arguments '(-f --follow)'{-f,--follow}'[follow until the run ends]' '1:session:_relay_sessions' ;;
+    kill)
+      shift words; (( CURRENT-- ))
+      _arguments '--all[end every session]' '1:session:_relay_sessions' ;;
+    completion)
+      (( CURRENT == 3 )) && compadd zsh bash ;;
+    ls|list) ;;
+    *) _relay_run ;;
+  esac
+}
+
+_relay "$@"
