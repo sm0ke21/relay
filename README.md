@@ -2,6 +2,8 @@
 
 A multi-agent harness for the `claude` CLI, with a full-screen TUI.
 
+**Website:** https://sm0ke21.github.io/relay/
+
 ![relay: an Opus lead fanning out to six Haiku workers, two of them escalating to Opus](docs/screenshot.png)
 
 <sub>Round 1 of a run (shown with simulated agents, <code>relay --mock</code>): t3 is done, t1 and the Opus-routed t5 are running, t2 is waiting on an Opus escalation, and t4/t6 are queued behind their dependencies.</sub>
