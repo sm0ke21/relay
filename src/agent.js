@@ -79,13 +79,19 @@ export class Agent extends EventEmitter {
       startedAt: 0,
       endedAt: 0,
       sessionId: '',
+      trDropped: 0,
     };
   }
 
   push(kind, text) {
     const tr = this.state.transcript;
     tr.push({ kind, text: String(text ?? ''), t: Date.now() });
-    if (tr.length > 3000) tr.splice(1, tr.length - 3000);
+    if (tr.length > 3000) {
+      // keep the prompt; drop the oldest entries after it
+      const n = tr.length - 3000;
+      tr.splice(1, n);
+      this.state.trDropped += n;
+    }
   }
 
   changed() {

@@ -26,10 +26,11 @@ const JUNC = {
 };
 
 export class TUI {
-  constructor({ opts, startRun, onQuit }) {
-    this.opts = opts;
+  constructor({ opts, startRun, onQuit, onDetach }) {
+    this._opts = opts;
     this.startRun = startRun;
     this.onQuit = onQuit;
+    this.onDetach = onDetach;
     this.orch = null;
     this.input = '';
     this.sel = 0;
@@ -38,7 +39,11 @@ export class TUI {
     this.tick = 0;
     this.flash = '';
     this.pending = false;
-    this.home = this.opts.cwd.replace(os.homedir(), '~');
+  }
+
+  // an attached session's own settings win over the local CLI flags
+  get opts() {
+    return this.orch?.opts || this._opts;
   }
 
   // ── lifecycle ─────────────────────────────────────────────────────────
@@ -75,15 +80,14 @@ export class TUI {
   }
 
   attach(orch) {
-    this.orch = orch;
     this.sel = 0;
     this.detail = false;
+    if (this.orch === orch) return;
+    this.orch = orch;
     orch.on('change', () => this.schedule());
     orch.on('end', (run) => {
-      this.flash =
-        run.phase === 'done'
-          ? 'done · enter opens a transcript · type a new task or ctrl-c to quit'
-          : `${run.phase} · type a new task or ctrl-c to quit`;
+      const tail = this.onDetach ? 'type a new task · ^D detach · ^C end session' : 'type a new task or ctrl-c to quit';
+      this.flash = run?.phase === 'done' ? `done · enter opens a transcript · ${tail}` : `${run?.phase || 'ended'} · ${tail}`;
       this.render();
     });
   }
@@ -128,6 +132,7 @@ export class TUI {
 
   // ── input ─────────────────────────────────────────────────────────────
   onKey(s) {
+    if (this.running()) this.flash = '';
     if (s === '\x03') {
       if (this.running() && !this.orch.aborted) {
         this.orch.abort();
@@ -135,6 +140,7 @@ export class TUI {
       } else this.onQuit();
       return this.render();
     }
+    if (s === '\x04' && this.onDetach) return this.onDetach();
     if (this.detail) {
       const page = Math.max(1, process.stdout.rows - 5);
       if (s === '\x1b' || s === 'q' || s === '\x1b[D' || s === '\r') this.detail = false;
@@ -165,6 +171,8 @@ export class TUI {
       else if (s === '\x15') this.input = '';
       else if (s === '\x17') this.input = this.input.replace(/\S+\s*$/, '');
       else if (!s.startsWith('\x1b')) this.input += s.replace(/[\r\n]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, '');
+    } else if (s === 'd' && this.onDetach) {
+      return this.onDetach();
     } else if (s === 'q') {
       this.orch.abort();
       this.flash = 'aborted · ctrl-c to quit';
@@ -643,10 +651,11 @@ export class TUI {
   drawPrompt(cv, W, y) {
     const run = this.run;
     const cursor = this.tick % 6 < 4 ? '█' : ' ';
-    const pre = [[this.home, S(C.blue)], [' $ ', S(C.white)]];
+    const pre = [[this.opts.cwd.replace(os.homedir(), '~'), S(C.blue)], [' $ ', S(C.white)]];
     let segs;
     if (this.running()) {
       segs = [...pre, ['relay ', S(C.white)], [`"${run.goal}"`, S(C.text)], [' ', ''], [cursor, S(C.green)]];
+      if (this.flash) segs.splice(2, 0, [`[${this.flash}] `, S(C.dim)]);
     } else {
       const avail = W - 4 - segLen(pre) - 2;
       const shown = [...this.input].slice(-avail).join('');
@@ -674,7 +683,10 @@ export class TUI {
       ...item('cost', `$${(this.orch?.cost || 0).toFixed(2)}`, C.green),
     ];
     cv.segs(2, y, segs, W - 4);
-    const keys = this.running() ? '⇥ select  ⏎ open  q abort' : '⇥ select  ⏎ open/run  ^C quit';
+    const sess = this.orch?.session?.id;
+    const keys = (sess ? `${sess} · ` : '') + (this.running()
+      ? `⇥ select  ⏎ open  ${sess ? 'd detach  ' : ''}q abort`
+      : `⇥ select  ⏎ open/run  ${sess ? '^D detach  ^C end' : '^C quit'}`);
     if (segLen(segs) + keys.length + 6 < W) cv.right(0, y, W - 2, [[keys, S(C.dim)]]);
   }
 

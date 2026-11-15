@@ -11,8 +11,25 @@ A multi-agent harness for the `claude` CLI, with a full-screen TUI.
 relay                                  # interactive: type tasks in the TUI
 relay "add input validation to api/"   # start right away
 relay --mock                           # simulated agents, no tokens spent
-relay --plain "task"                   # log lines only (CI / pipes)
+relay --plain "task"                   # log lines only (CI / pipes), no session
 ```
+
+## Detach and come back
+
+Each run happens in a background **session** process, and the TUI is just a client attached to it, the same model as tmux.
+
+```
+relay "big refactor"        # attach as usual; press d (or ctrl-d) to detach
+relay -d "big refactor"     # or start detached straight away
+relay ls                    # live sessions + recently finished runs (with report paths)
+relay attach [id]           # default: the newest session started in this directory
+relay logs [id] [-f]        # print the session log; -f follows until the run ends
+relay kill <id> | --all     # end sessions (aborts running agents)
+```
+
+You can close the terminal or log out and the agents keep working. Several clients can be attached to one session at once. When a run finishes, the session stays up, idle, so you can attach later, read transcripts and give it another task. After `--idle-timeout` hours (default 24) with nobody attached, it exits. Once a session is gone, `relay ls` still lists its run and report.
+
+In the TUI, `ctrl-c` aborts the run; pressing it again ends the session. Session state is stored in `${XDG_STATE_HOME:-~/.local/state}/relay/` (override with `RELAY_STATE_DIR`), and each session's server log is there too.
 
 ## How it works
 
@@ -28,6 +45,7 @@ relay --plain "task"                   # log lines only (CI / pipes)
              └─────────────────────────────┘
 ```
 
+- `src/session.js` holds the detachable session server, which owns the orchestrator and streams throttled snapshots plus transcript deltas over a unix socket. It also has the `RemoteSession` client that mirrors that state for the TUI.
 - `src/orchestrator.js` runs plan → execute → review. It also runs the unix-socket server that takes escalations and launches them as agents.
 - `src/escalate-mcp.js` is a stdio MCP server with no dependencies. Each worker gets it through `--mcp-config` and it forwards `escalate_to_opus` calls over the socket.
 - `src/agent.js` spawns `claude -p --output-format stream-json` and parses the events into state.
@@ -58,6 +76,6 @@ relay --allow "Bash(npm test:*)" --allow "Bash(git diff:*)" "fix the flaky auth 
 
 ## Keys
 
-`tab`/arrows select the lead, a worker or an escalation · `enter` starts the typed task or opens the selected agent's transcript (↑↓ PgUp/PgDn g/G, esc to go back) · `q` aborts the run · `ctrl-c` aborts, then quits.
+`tab`/arrows select the lead, a worker or an escalation · `enter` starts the typed task or opens the selected agent's transcript (↑↓ PgUp/PgDn g/G, esc to go back) · `d`/`ctrl-d` detaches · `q` aborts the run · `ctrl-c` aborts, then ends the session.
 
 At least 100×30 is recommended. Below that the layout shrinks step by step and pages through worker rows.

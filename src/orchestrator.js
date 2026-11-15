@@ -90,7 +90,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   log(who, color, msg) {
-    const e = { t: Date.now(), who, color, msg: String(msg).replace(/\s+/g, ' ').trim() };
+    const e = { seq: (this.seq = (this.seq || 0) + 1), t: Date.now(), who, color, msg: String(msg).replace(/\s+/g, ' ').trim() };
     this.run.log.push(e);
     if (this.run.log.length > 500) this.run.log.shift();
     this.emit('log', e);
