@@ -11,11 +11,62 @@ A multi-agent harness for the `claude` CLI, with a full-screen TUI.
 - **Opus on call.** Every worker has an `escalate_to_opus` tool. A worker that gets stuck hands the problem up: `advise` gets read-only guidance back, `delegate` has Opus do the work. Each escalation shows up live in the diagram.
 - **A report for every run.** Each run leaves `.relay/runs/<time>/report.md`, `run.json` and the raw stream-json of every agent.
 
+## Getting started
+
+**Requirements**
+- Node.js 20 or newer. There are no npm dependencies and no build step.
+- The [Claude Code](https://claude.com/claude-code) CLI (`claude`) installed and logged in. relay starts every agent through it, so runs use your Claude account. If `claude` isn't on your `PATH`, set `RELAY_CLAUDE_BIN=/path/to/claude`.
+
+**Install**
+
+```
+git clone https://github.com/sm0ke21/relay.git
+cd relay
+npm install -g .        # puts `relay` on your PATH (or `npm link` to follow the checkout)
+```
+
+You can also skip installing and run `node bin/relay.js` from the checkout.
+
+**Try it for free first.** `--mock` swaps in simulated agents, so you can explore the TUI without spending tokens:
+
+```
+relay --mock
+```
+
+**Run it on a real project**
+
+```
+cd ~/code/myproject
+relay "add input validation to the API"
+```
+
+Workers can edit files without asking, but **shell commands are blocked unless you allow them**. Without an `--allow` rule, nobody can run your tests:
+
+```
+relay --allow "Bash(npm test:*)" --allow "Bash(git diff:*)" "fix the failing auth tests"
+```
+
+Each run writes its report to `.relay/runs/` inside the project. You may want to add `.relay/` to that project's `.gitignore`.
+
+### Usage
+
 ```
 relay                                  # interactive: type tasks in the TUI
 relay "add input validation to api/"   # start right away
 relay --mock                           # simulated agents, no tokens spent
 relay --plain "task"                   # log lines only (CI / pipes), no session
+relay --budget 2 "task"                # stop dispatching new work past $2
+```
+
+### Shell completion
+
+`relay attach <TAB>` completes live session ids and shows each one's phase, goal and directory. `logs`, `kill`, subcommands, flags and model names complete too.
+
+```
+# zsh (oh-my-zsh: any dir on $fpath works, e.g. ~/.oh-my-zsh/custom/completions)
+relay completion zsh > ~/.oh-my-zsh/custom/completions/_relay && exec zsh
+# bash
+echo 'eval "$(relay completion bash)"' >> ~/.bashrc
 ```
 
 ## Detach and come back
@@ -32,17 +83,6 @@ relay kill <id> | --all     # end sessions (aborts running agents)
 ```
 
 You can close the terminal or log out and the agents keep working. Several clients can be attached to one session at once. When a run finishes, the session stays up, idle, so you can attach later, read transcripts and give it another task. After `--idle-timeout` hours (default 24) with nobody attached, it exits. Once a session is gone, `relay ls` still lists its run and report.
-
-### Shell completion
-
-`relay attach <TAB>` completes live session ids and shows each one's phase, goal and directory. `logs`, `kill`, subcommands, flags and model names complete too.
-
-```
-# zsh (oh-my-zsh: any dir on $fpath works, e.g. ~/.oh-my-zsh/custom/completions)
-relay completion zsh > ~/.oh-my-zsh/custom/completions/_relay && exec zsh
-# bash
-echo 'eval "$(relay completion bash)"' >> ~/.bashrc
-```
 
 In the TUI, `ctrl-c` aborts the run; pressing it again ends the session. Session state is stored in `${XDG_STATE_HOME:-~/.local/state}/relay/` (override with `RELAY_STATE_DIR`), and each session's server log is there too.
 
