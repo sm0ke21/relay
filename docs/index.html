@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>relay · multi-agent harness for the claude CLI</title>
-<meta name="description" content="relay runs Claude Code as a team: an Opus lead plans, Haiku workers run tasks in parallel, and any worker can escalate a hard problem to Opus. Full-screen TUI, detachable sessions, a report for every run.">
+<meta name="description" content="relay runs Claude Code as a team: an Opus lead plans, Haiku workers run tasks in parallel, and any worker can escalate a hard problem to Opus. Full-screen TUI with a tool-call timeline, detachable sessions, a report for every run.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#1b1c26">
 <link rel="canonical" href="https://sm0ke21.github.io/relay/">
@@ -83,6 +83,9 @@
   /* screenshot */
   .shot { margin: 46px auto 0; max-width: 1000px; }
   .shot img { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 30px 80px -20px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.02); }
+  .shot.tl { margin: 0 0 28px; max-width: none; }
+  .tl-try { margin-top: 8px; }
+  h3.mini { color: var(--white); font-size: 16px; margin: 0 0 8px; }
   .shot figcaption { color: var(--dim); font-size: 13px; text-align: center; margin-top: 12px; }
 
   /* sections */
@@ -143,6 +146,7 @@
     <a class="brand" href="#top" aria-label="relay home"><span class="chev">❯</span> relay</a>
     <nav class="nav-links" aria-label="Main">
       <a class="opt" href="#how">How it works</a>
+      <a class="opt" href="#tools">Tool calls</a>
       <a class="opt" href="#sessions">Sessions</a>
       <a class="opt" href="#start">Get started</a>
       <a class="gh-btn" href="https://github.com/sm0ke21/relay">
@@ -211,12 +215,37 @@
       <p class="eyebrow">Features</p>
       <h2>Built for runs you leave unattended</h2>
       <div class="grid">
-        <div class="card" style="--c: var(--orange)"><h3><span class="dot"></span>Live TUI</h3><p>Shows the plan, each worker's progress and current activity, escalations, cost and tokens. Press enter on any agent to read its full transcript.</p></div>
+        <div class="card" style="--c: var(--orange)"><h3><span class="dot"></span>Live TUI</h3><p>Shows the plan, each worker's progress and current tool call, escalations, cost and tokens. Press enter on any agent for its full transcript, or <code>t</code> for its tool timeline.</p></div>
         <div class="card" style="--c: var(--blue)"><h3><span class="dot"></span>Detachable sessions</h3><p>Every run lives in a background session. Detach, close the laptop, and <code>relay attach</code> later.</p></div>
         <div class="card" style="--c: var(--green)"><h3><span class="dot"></span>A report for every run</h3><p><code>.relay/runs/&lt;time&gt;/</code> holds a markdown report, a JSON summary and the raw output of every agent.</p></div>
         <div class="card" style="--c: var(--purple)"><h3><span class="dot"></span>Spending limits</h3><p><code>--budget</code> stops starting new work once total spend passes the amount you set, and caps each agent too. You can also limit parallel workers, rounds, tasks and escalations.</p></div>
         <div class="card" style="--c: var(--red)"><h3><span class="dot"></span>Safe by default</h3><p>Workers can edit files, but shell commands are blocked unless you allow them, e.g. <code>--allow "Bash(npm test:*)"</code>.</p></div>
         <div class="card" style="--c: var(--dim)"><h3><span class="dot"></span>Zero dependencies</h3><p>Plain Node.js, no build step. <code>--mock</code> simulates every agent so you can try the whole thing for free.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tools">
+    <div class="wrap">
+      <p class="eyebrow">Tool calls</p>
+      <h2>See every tool call, including MCP</h2>
+      <p class="sub">Worker boxes show the call in progress. MCP calls are labelled <code>server · tool key-args</code>, for example <code>github · create_issue title="Fix race"</code>, and each server gets its own colour. Open any agent and press <code>t</code> for its tool timeline: every call is a bar on the agent's clock, with its duration and ✓/✗, plus totals per tool, slowest first.</p>
+      <figure class="shot tl">
+        <img src="timeline.png" width="1324" height="466" loading="lazy" alt="relay's tool timeline for one worker: a row per tool call with a bar showing when it ran and for how long. MCP calls to github, postgres and linear each appear in their own colour; three failed calls are red with an ✗.">
+        <figcaption>A worker's tool timeline, shown with simulated agents and fake <code>github</code>, <code>linear</code> and <code>postgres</code> servers</figcaption>
+      </figure>
+      <div class="two tl-try">
+        <div>
+          <h3 class="mini">Try it with a real MCP server</h3>
+          <p class="sub">The repo includes a small demo MCP server with made-up data. Its tools take different amounts of time and one always fails. <code>--mcp-config</code> gives workers the servers in a JSON file and allows their tools.</p>
+        </div>
+        <div class="term" role="region" aria-label="Try the demo MCP server">
+          <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span>~/code/relay</span></div>
+<pre><span class="p">$ </span>node examples/demo-mcp.js --config \
+    &gt; /tmp/demo-mcp.json
+<span class="p">$ </span>relay --mcp-config /tmp/demo-mcp.json \
+    "use the demo tools, then summarise"</pre>
+        </div>
       </div>
     </div>
   </section>
