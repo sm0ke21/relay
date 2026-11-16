@@ -259,7 +259,7 @@ export class TUI {
 
     const logLines = H >= 44 ? 5 : H >= 32 ? 4 : H >= 26 ? 3 : 2;
     const logH = logLines + 2;
-    const logY = H - 3 - logH;
+    const logY = H - 5 - logH;
     const bodyH = logY - 1 - top;
 
     let x0 = 2, dw = W - 4;
@@ -277,7 +277,7 @@ export class TUI {
       cv.clip = null;
     }
     this.drawLog(cv, 1, logY, W - 2, logH);
-    this.drawPrompt(cv, W, H - 2);
+    this.drawPrompt(cv, 1, H - 4, W - 2);
     this.drawStatus(cv, W, H - 1);
   }
 
@@ -686,7 +686,8 @@ export class TUI {
     if (!log.length) cv.segs(x + 2, y + 1, [['no activity yet', S(C.dim)]], w - 4);
   }
 
-  drawPrompt(cv, W, y) {
+  drawPrompt(cv, x, y, w) {
+    cv.box(x, y, w, 3, S(C.faint));
     const run = this.run;
     const cursor = this.tick % 6 < 4 ? '█' : ' ';
     const pre = [[this.opts.cwd.replace(os.homedir(), '~'), S(C.blue)], [' $ ', S(C.white)]];
@@ -695,12 +696,12 @@ export class TUI {
       segs = [...pre, ['relay ', S(C.white)], [`"${run.goal}"`, S(C.text)], [' ', ''], [cursor, S(C.green)]];
       if (this.flash) segs.splice(2, 0, [`[${this.flash}] `, S(C.dim)]);
     } else {
-      const avail = W - 4 - segLen(pre) - 2;
+      const avail = w - 4 - segLen(pre) - 2;
       const shown = [...this.input].slice(-avail).join('');
       segs = [...pre, [shown, S(C.white)], [cursor, S(C.green)]];
       if (!this.input) segs.push([` ${this.flash || 'describe a task and press enter'}`, S(C.dim)]);
     }
-    cv.segs(2, y, segs, W - 4);
+    cv.segs(x + 2, y + 1, segs, w - 4);
   }
 
   drawStatus(cv, W, y) {
