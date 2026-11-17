@@ -1,0 +1,35 @@
+docs/index.html
+  s_8bcec59a3ca63f::t_0df7803c5a4ec9 219,259
+README.md
+  s_18270acbf8a619::t_bfa1d826e572f2 159-162
+src/tui.js
+  s_8bcec59a3ca63f::t_cdc91112d9b3ea 76,124,194,196-200,203-208,211-214,219,221,226-229,239-263,638,738,745-746
+src/orchestrator.js
+  s_8bcec59a3ca63f::t_0d39443e927e8b 35-38,59-82,89-93,100,103-104,122-127,159,230,306-309,317-319,321-323,338-340,350,354-356,397,517,582,591-593,617-619,627-628
+src/session.js
+  s_8bcec59a3ca63f::t_611869d4d0b7d8 154-156,235-237,244-258,262-263,265,273,278-284,327,368,502-505
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "061c9647f353a926f56adbb33ad80da6b31e1b69",
+  "prompts": {},
+  "sessions": {
+    "s_18270acbf8a619": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a71c0268-4636-4bc7-96ca-7d972295110e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dimitrios Kordas <sm0ke@Dimitrioss-MacBook-Pro.local>"
+    },
+    "s_8bcec59a3ca63f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7da5259a-c956-4797-aaa2-0384928d6be2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dimitrios Kordas <sm0ke@Dimitrioss-MacBook-Pro.local>"
+    }
+  }
+}
