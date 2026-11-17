@@ -151,6 +151,9 @@ class SessionServer {
     this.clients = new Set();
     this.orch = null;
     this.runSeq = 0;
+    // Finished runs of the current conversation, oldest first. Each new message
+    // is a follow-up to these; only /new starts a fresh conversation.
+    this.thread = [];
     this.startedAt = Date.now();
     this.lastActive = Date.now();
     this.metaAt = 0;
@@ -229,18 +232,37 @@ class SessionServer {
       case 'abort':
         this.orch?.abort();
         break;
+      case 'new':
+        this.reset();
+        break;
       case 'quit':
         this.shutdown('quit from client');
         break;
     }
   }
 
+  // /new: drop the current run (aborting it if it is still going) and forget
+  // the conversation, so the next message starts from scratch and clients go
+  // back to an empty screen. An aborted run still finishes in the background
+  // and writes its report and history entry.
+  reset() {
+    this.thread = [];
+    if (!this.orch) return;
+    this.orch.abort();
+    this.orch = null;
+    this.runSeq++;
+    this.lastActive = Date.now();
+    this.flush();
+    this.writeMeta(true);
+  }
+
   start(goal) {
     this.runSeq++;
     this.lastActive = Date.now();
-    const orch = new Orchestrator(this.opts);
+    const thread = this.thread;
+    const orch = new Orchestrator({ ...this.opts, history: thread.slice() });
     this.orch = orch;
-    orch.on('change', () => this.dirty());
+    orch.on('change', () => this.orch === orch && this.dirty());
     orch.on('end', (run) => {
       this.lastActive = Date.now();
       try {
@@ -248,11 +270,18 @@ class SessionServer {
         fs.appendFileSync(
           HISTORY,
           JSON.stringify({
-            id: this.id, goal: run.goal, cwd: this.opts.cwd, phase: run.phase, verdict: run.verdict,
+            id: this.id, turn: run.turn, goal: run.goal, cwd: this.opts.cwd, phase: run.phase, verdict: run.verdict,
             cost: orch.cost, report: run.reportPath, startedAt: run.startedAt, endedAt: run.endedAt,
           }) + '\n',
         );
       } catch {}
+      // A /new during the run swapped in a fresh thread; this one is gone.
+      if (thread === this.thread)
+        thread.push({
+          goal: run.goal, brief: run.brief, phase: run.phase, verdict: run.verdict,
+          summary: run.summary || run.error, reportPath: run.reportPath,
+        });
+      if (this.orch !== orch) return; // replaced by /new or a later run
       this.flush();
       for (const c of this.clients) this.send(c, { type: 'end', phase: run.phase });
       this.writeMeta(true);
@@ -295,7 +324,7 @@ class SessionServer {
     const r = o.run;
     const aid = (a) => a?.id ?? null;
     const run = {
-      goal: r.goal, phase: r.phase, round: r.round, plan: r.plan, rounds: r.rounds,
+      goal: r.goal, brief: r.brief, turn: r.turn, phase: r.phase, round: r.round, plan: r.plan, rounds: r.rounds,
       verdict: r.verdict, summary: r.summary, startedAt: r.startedAt, endedAt: r.endedAt,
       reportPath: r.reportPath, error: r.error,
       log: r.log.slice(c.mode === 'logs' ? -500 : -80),
@@ -336,6 +365,7 @@ class SessionServer {
       verdict: r?.verdict || '',
       cost: this.orch?.cost || 0,
       runs: this.runSeq,
+      turns: this.thread.length,
       clients: this.clients.size,
       report: r?.reportPath || '',
       startedAt: this.startedAt,
@@ -467,6 +497,10 @@ export class RemoteSession extends EventEmitter {
 
   abort() {
     this.send({ type: 'abort' });
+  }
+
+  reset() {
+    this.send({ type: 'new' });
   }
 
   quit() {

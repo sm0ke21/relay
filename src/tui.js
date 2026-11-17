@@ -73,6 +73,7 @@ export class TUI {
     this.tick = 0;
     this.flash = '';
     this.pending = false;
+    this.cmd = false; // '/' command line opened during a run
   }
 
   // an attached session's own settings win over the local CLI flags
@@ -120,7 +121,7 @@ export class TUI {
     this.orch = orch;
     orch.on('change', () => this.schedule());
     orch.on('end', (run) => {
-      const tail = this.onDetach ? 'type a new task · ^D detach · ^C end session' : 'type a new task or ctrl-c to quit';
+      const tail = this.onDetach ? 'type a follow-up · /new starts over · ^D detach · ^C end session' : 'type a follow-up · /new starts over · ctrl-c to quit';
       this.flash = run?.phase === 'done' ? `done · enter opens a transcript · ${tail}` : `${run?.phase || 'ended'} · ${tail}`;
       this.render();
     });
@@ -190,25 +191,42 @@ export class TUI {
       }
       return this.render();
     }
+    if (this.cmd && !this.running()) this.cmd = false; // run ended under us; keep the text as normal input
     const idle = !this.running();
-    if (s === '\t' || s === '\x1b[C' || s === '\x1b[B') this.sel++;
+    const editing = idle || this.cmd;
+    if (this.cmd && s === '\x1b') {
+      this.cmd = false;
+      this.input = '';
+    } else if (s === '\t' || s === '\x1b[C' || s === '\x1b[B') this.sel++;
     else if (s === '\x1b[Z' || s === '\x1b[D' || s === '\x1b[A') this.sel--;
     else if (s === '\r') {
-      if (idle && this.input.trim()) {
-        const goal = this.input.trim();
+      const text = this.input.trim();
+      if (editing && /^\/[a-z]+(\s|$)/i.test(text)) {
+        this.input = '';
+        this.cmd = false;
+        this.command(text);
+      } else if (idle && text) {
         this.input = '';
         this.flash = '';
-        this.attach(this.startRun(goal));
+        this.attach(this.startRun(text));
+      } else if (this.cmd) {
+        this.cmd = false;
+        this.input = '';
       } else if (this.selected()) {
         this.detail = true;
         this.scroll = 0;
       }
-    } else if (idle) {
+    } else if (editing) {
       if (s === '\x04' && !this.input) return this.onQuit();
+      if ((s === '\x7f' || s === '\b') && this.cmd && this.input === '/') this.cmd = false;
       if (s === '\x7f' || s === '\b') this.input = [...this.input].slice(0, -1).join('');
       else if (s === '\x15') this.input = '';
       else if (s === '\x17') this.input = this.input.replace(/\S+\s*$/, '');
       else if (!s.startsWith('\x1b')) this.input += s.replace(/[\r\n]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, '');
+    } else if (s === '/') {
+      this.cmd = true;
+      this.input = '/';
+      this.flash = '';
     } else if (s === 'd' && this.onDetach) {
       return this.onDetach();
     } else if (s === 'q') {
@@ -216,6 +234,31 @@ export class TUI {
       this.flash = 'aborted · ctrl-c to quit';
     }
     this.render();
+  }
+
+  // Slash commands typed at the prompt. Plain messages are follow-ups to the
+  // conversation so far; `/new` drops the current run (aborting it if it is
+  // still going), forgets the conversation and returns to an empty screen in
+  // the same session; `/new <task>` then starts that task straight away.
+  command(text) {
+    const [, name, rest] = text.match(/^\/([a-z]+)\s*(.*)$/i);
+    switch (name.toLowerCase()) {
+      case 'new': {
+        const wasRunning = this.running();
+        this.orch?.reset?.();
+        this.sel = 0;
+        this.detail = false;
+        this.scroll = 0;
+        if (rest.trim()) {
+          // the server handles messages in order, so the reset lands first
+          this.flash = '';
+          this.attach(this.startRun(rest.trim()));
+        } else this.flash = wasRunning ? 'run aborted · new conversation' : 'new conversation';
+        break;
+      }
+      default:
+        this.flash = `unknown command /${name} · try /new`;
+    }
   }
 
   // ── render ────────────────────────────────────────────────────────────
@@ -592,7 +635,7 @@ export class TUI {
         [[o.yolo ? 'bypass permissions' : o.permissionMode, S(o.yolo ? C.red : C.text)]],
       ]);
     } else {
-      head('◇', 'goal', C.text, false);
+      head('◇', run.turn > 1 ? `goal · turn ${run.turn}` : 'goal', C.text, false);
       kids(wrapK(run.goal, C.white, 4));
       gap();
       const planning = run.phase === 'planning';
@@ -692,14 +735,15 @@ export class TUI {
     const cursor = this.tick % 6 < 4 ? '█' : ' ';
     const pre = [[this.opts.cwd.replace(os.homedir(), '~'), S(C.blue)], [' $ ', S(C.white)]];
     let segs;
-    if (this.running()) {
+    if (this.running() && !this.cmd) {
       segs = [...pre, ['relay ', S(C.white)], [`"${run.goal}"`, S(C.text)], [' ', ''], [cursor, S(C.green)]];
       if (this.flash) segs.splice(2, 0, [`[${this.flash}] `, S(C.dim)]);
     } else {
       const avail = w - 4 - segLen(pre) - 2;
       const shown = [...this.input].slice(-avail).join('');
       segs = [...pre, [shown, S(C.white)], [cursor, S(C.green)]];
-      if (!this.input) segs.push([` ${this.flash || 'describe a task and press enter'}`, S(C.dim)]);
+      if (!this.input) segs.push([` ${this.flash || (run ? 'type a follow-up and press enter' : 'describe a task and press enter')}`, S(C.dim)]);
+      else if (this.cmd) segs.push([' enter runs · esc cancels', S(C.dim)]);
     }
     cv.segs(x + 2, y + 1, segs, w - 4);
   }

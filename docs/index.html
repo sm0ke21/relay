@@ -216,7 +216,7 @@
       <h2>Built for runs you leave unattended</h2>
       <div class="grid">
         <div class="card" style="--c: var(--orange)"><h3><span class="dot"></span>Live TUI</h3><p>Shows the plan, each worker's progress and current tool call, escalations, cost and tokens. Press enter on any agent for its full transcript, or <code>t</code> for its tool timeline.</p></div>
-        <div class="card" style="--c: var(--blue)"><h3><span class="dot"></span>Detachable sessions</h3><p>Every run lives in a background session. Detach, close the laptop, and <code>relay attach</code> later.</p></div>
+        <div class="card" style="--c: var(--blue)"><h3><span class="dot"></span>Sessions are conversations</h3><p>Every run lives in a background session. Detach, close the laptop, and <code>relay attach</code> later. Next messages are follow-ups to the earlier runs; <code>/new</code> starts over.</p></div>
         <div class="card" style="--c: var(--green)"><h3><span class="dot"></span>A report for every run</h3><p><code>.relay/runs/&lt;time&gt;/</code> holds a markdown report, a JSON summary and the raw output of every agent.</p></div>
         <div class="card" style="--c: var(--purple)"><h3><span class="dot"></span>Spending limits</h3><p><code>--budget</code> stops starting new work once total spend passes the amount you set, and caps each agent too. You can also limit parallel workers, rounds, tasks and escalations.</p></div>
         <div class="card" style="--c: var(--red)"><h3><span class="dot"></span>Safe by default</h3><p>Workers can edit files, but shell commands are blocked unless you allow them, e.g. <code>--allow "Bash(npm test:*)"</code>.</p></div>
@@ -256,6 +256,7 @@
         <p class="eyebrow">Sessions</p>
         <h2>Detach and come back later</h2>
         <p class="sub">The TUI attaches to a session over a unix socket, the same way tmux works. Press <code>d</code> to detach and the agents keep working. Several terminals can watch one session, and <code>relay attach &lt;TAB&gt;</code> completes session ids in zsh and bash.</p>
+        <p class="sub">A session is also a conversation. When a run ends, type a follow-up such as “now add tests for that”. The lead sees your earlier messages and their results, so it knows what “that” means. Type <code>/new</code> to start a fresh conversation in the same session.</p>
       </div>
       <div class="term" role="region" aria-label="Session commands">
         <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span>~/code/app</span></div>

@@ -156,4 +156,8 @@ relay --mcp-config /tmp/demo-mcp.json \
 
 `tab`/arrows select the lead, a worker or an escalation · `enter` starts the typed task or opens the selected agent's transcript (↑↓ PgUp/PgDn g/G, esc to go back) · `t` in that view switches to the tool timeline · `d`/`ctrl-d` detaches · `q` aborts the run · `ctrl-c` aborts, then ends the session.
 
+**Follow-ups:** a session is one conversation. Each message you type after a run ends is a follow-up: the lead sees the earlier messages and their results (summaries and report paths), so "now add tests for that" works. Each run still writes its own report.
+
+**Starting over:** type `/new` and press enter to forget the conversation, clear the screen and start a new task in the same session, with no need to quit and restart relay. `/new <task>` clears and starts that task right away. During a run, press `/` to open the command line (esc cancels). Running `/new` then aborts the current run, which still writes its report.
+
 At least 100×30 is recommended. Below that the layout shrinks step by step and pages through worker rows.

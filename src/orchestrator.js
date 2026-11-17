@@ -32,6 +32,10 @@ export const PLAN_SCHEMA = {
   type: 'object',
   properties: {
     summary: { type: 'string', description: 'one line: the approach' },
+    brief: {
+      type: 'string',
+      description: 'The latest request restated so it stands on its own, resolving any reference to earlier turns of the conversation. Workers see this as the overall goal.',
+    },
     tasks: { type: 'array', minItems: 1, items: TASK_ITEM },
   },
   required: ['summary', 'tasks'],
@@ -52,21 +56,52 @@ const clip = (s, n) => {
   s = String(s ?? '');
   return s.length > n ? s.slice(0, n) + `\n…[${s.length - n} more chars]` : s;
 };
+const MAX_TURNS = 10;
+
+// Earlier turns as prompt context: the most recent ones in full-ish, older
+// ones trimmed so a long conversation doesn't swamp the prompt.
+function historyBlock(history) {
+  if (!history.length) return '';
+  const turns = history.map((h, i) => {
+    const recent = i >= history.length - 2;
+    const lines = [
+      `### Turn ${i + 1}${h.phase && h.phase !== 'done' ? ` (${h.phase})` : ''}`,
+      `User: ${clip(h.goal, recent ? 2000 : 500)}`,
+      h.brief && h.brief !== h.goal ? `Understood as: ${clip(h.brief, recent ? 1500 : 400)}` : '',
+      h.verdict ? `Verdict: ${h.verdict}` : '',
+      `Result:\n${clip(h.summary || '(no summary)', recent ? 6000 : 1200)}`,
+      h.reportPath ? `Full report: ${h.reportPath}` : '',
+    ];
+    return lines.filter(Boolean).join('\n');
+  });
+  return [
+    'CONVERSATION SO FAR (earlier messages from the same user in this session, oldest first; their changes are already in the working tree):',
+    turns.join('\n\n'),
+  ].join('\n\n');
+}
+
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
 export class Orchestrator extends EventEmitter {
   /**
    * opts: { cwd, lead, worker, escalate, effort, concurrency, rounds, maxTasks,
    *         maxEscalations, budget, permissionMode, allow[], yolo, inheritMcp,
-   *         keepSessions, mock, outDir }
+   *         keepSessions, mock, outDir, history[] }
+   *
+   * history: earlier turns of the same conversation (oldest first), each
+   *   { goal, brief, phase, verdict, summary, reportPath }. Lets a message be a
+   *   follow-up to the previous ones; empty for the first message after /new.
    */
   constructor(opts) {
     super();
     this.o = opts;
     this.agents = [];
     this.aborted = false;
+    this.history = (opts.history || []).slice(-MAX_TURNS);
     this.run = {
       goal: '',
+      brief: '', // self-contained restatement of goal (set by the plan)
+      turn: (opts.history || []).length + 1,
       phase: 'idle',
       round: 0,
       plan: null,
@@ -82,6 +117,12 @@ export class Orchestrator extends EventEmitter {
       reportPath: '',
       error: '',
     };
+  }
+
+  // What workers and escalations see as the goal: the plan's self-contained
+  // restatement when there is one, else the user's words.
+  get goalText() {
+    return this.run.brief || this.run.goal;
   }
 
   // ── bookkeeping ────────────────────────────────────────────────────────
@@ -115,7 +156,7 @@ export class Orchestrator extends EventEmitter {
       cwd: this.o.cwd,
       keepSessions: this.o.keepSessions,
       logFile: this.runDir ? path.join(this.runDir, 'agents', `${o.id}.jsonl`) : null,
-      goal: this.run.goal,
+      goal: this.goalText,
       round: this.run.round,
     };
     const left = this.budgetLeft();
@@ -186,7 +227,7 @@ export class Orchestrator extends EventEmitter {
     const advise = mode !== 'delegate';
     const prompt = [
       `A ${this.label(this.o.worker)} worker in a multi-agent run escalated a problem to you (${mode}).`,
-      `Overall goal of the run: ${run.goal}`,
+      `Overall goal of the run: ${this.goalText}`,
       task ? `The worker's task (${task.id} · ${task.title}):\n${task.prompt}` : '',
       `QUESTION:\n${question}`,
       context ? `CONTEXT FROM THE WORKER:\n${context}` : '',
@@ -262,7 +303,10 @@ export class Orchestrator extends EventEmitter {
       `You plan. Cheaper ${o.worker} workers execute tasks in parallel (up to ${o.concurrency} at once). ` +
         `Workers can escalate hard sub-problems to ${o.escalate} themselves.`,
       `Working directory: ${o.cwd}`,
-      `GOAL:\n${this.run.goal}`,
+      historyBlock(this.history),
+      this.history.length
+        ? `LATEST MESSAGE (the goal of this run; it may be a follow-up that refers to the turns above):\n${this.run.goal}`
+        : `GOAL:\n${this.run.goal}`,
       [
         'Investigate the repository as much as you need to (read-only tools) to plan well, then return the plan as structured output.',
         `- Split the goal into 1-${o.maxTasks} self-contained tasks. A fast, literal model executes each from its prompt alone: give concrete file paths, the exact change or answer expected, and how to check it.`,
@@ -270,8 +314,13 @@ export class Orchestrator extends EventEmitter {
         '- Do not over-split. A small goal is one task. A question can be answered by one or a few investigation tasks.',
         '- model "strong" only for a task that genuinely needs deep reasoning; otherwise "fast".',
         '- ids: t1, t2, ...  titles: 2-4 lowercase words.',
+        this.history.length
+          ? '- brief: restate the latest message so it stands alone (workers never see the earlier turns). Each task prompt must also carry any context it needs from earlier turns.'
+          : '- brief: the goal, restated only if it needs clarifying; otherwise repeat it.',
       ].join('\n'),
-    ].join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
 
   reviewPrompt(round) {
@@ -286,7 +335,9 @@ export class Orchestrator extends EventEmitter {
       .join('\n\n');
     return [
       `You are the lead orchestrator. Round ${round} of at most ${this.o.rounds} has finished.`,
-      `GOAL:\n${run.goal}`,
+      historyBlock(this.history),
+      this.history.length ? `LATEST MESSAGE (the goal of this run):\n${run.goal}` : `GOAL:\n${run.goal}`,
+      run.brief && run.brief !== run.goal ? `UNDERSTOOD AS:\n${run.brief}` : '',
       `PLAN: ${run.plan?.summary || ''}`,
       `TASK RESULTS:\n\n${results}`,
       [
@@ -296,10 +347,13 @@ export class Orchestrator extends EventEmitter {
         '- summary: the final report for the user in markdown — what was done, files changed, caveats. If the goal was a question, the full answer.',
         `- followups: only when done is false — tasks for the next round, same rules as planning (self-contained, no two parallel tasks on one file). New ids, not reused ones.`,
         last ? '- This is the LAST round: done must be true; summarise what remains undone in summary.' : '',
+        this.history.length ? '- The summary answers the latest message; the user may send another follow-up after reading it.' : '',
       ]
         .filter(Boolean)
         .join('\n'),
-    ].join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
 
   // ── workers ───────────────────────────────────────────────────────────
@@ -340,7 +394,7 @@ export class Orchestrator extends EventEmitter {
       .filter((d) => d?.agent?.state.result)
       .map((d) => `[${d.id} · ${d.title}] reported:\n${clip(d.agent.state.result, 1500)}`);
     return [
-      `Overall goal (for context only): ${this.run.goal}`,
+      `Overall goal (for context only): ${this.goalText}`,
       `YOUR TASK (${t.id} · ${t.title}):\n${t.prompt}`,
       deps.length ? `Results from tasks you depend on:\n\n${deps.join('\n\n')}` : '',
     ]
@@ -460,6 +514,7 @@ export class Orchestrator extends EventEmitter {
       this.log(this.label(this.o.lead), 'orange', `planning · ${goal}`);
       const plan = await this.lead('plan', this.planPrompt(), PLAN_SCHEMA);
       run.plan = plan;
+      run.brief = String(plan.brief || '').trim();
       const tasks = this.addTasks(plan.tasks || [], 1);
       this.log(this.label(this.o.lead), 'orange', `plan · ${tasks.length} tasks · ${plan.summary}`);
 
@@ -524,6 +579,7 @@ export class Orchestrator extends EventEmitter {
     const md = [
       `# relay run · ${new Date(run.startedAt).toISOString()}`,
       `**Goal:** ${run.goal}`,
+      run.turn > 1 ? `**Follow-up:** turn ${run.turn} of this conversation${run.brief && run.brief !== run.goal ? ` — understood as: ${run.brief}` : ''}` : '',
       `**Phase:** ${run.phase}${run.error ? ` — ${run.error}` : ''}  ·  **Verdict:** ${run.verdict || '-'}  ·  **Cost:** ${money(this.cost)}  ·  **Elapsed:** ${((run.endedAt - run.startedAt) / 1000).toFixed(1)}s`,
       `## Summary\n\n${run.summary || '_none_'}`,
       `## Plan\n\n${run.plan?.summary || ''}\n\n` +
@@ -532,6 +588,9 @@ export class Orchestrator extends EventEmitter {
           .join('\n'),
       `## Escalations\n\n` +
         (run.escalations.map((e) => `- **${e.id}** from ${e.taskId} (${e.mode}): ${e.question}\n  - → ${clip(e.agent?.state.result || e.agent?.state.error, 800).replace(/\n/g, '\n    ')}`).join('\n') || '_none_'),
+      this.history.length
+        ? `## Earlier turns\n\n` + this.history.map((h, i) => `${i + 1}. ${h.goal}${h.reportPath ? ` — ${h.reportPath}` : ''}`).join('\n')
+        : '',
       `## Agents\n\n| id | role | model | status | turns | tools | tok in | tok out | cost | time |\n|---|---|---|---|---|---|---|---|---|---|\n${this.agents.map(row).join('\n')}`,
       `## Tool calls\n\n` +
         (this.agents
@@ -555,7 +614,9 @@ export class Orchestrator extends EventEmitter {
           .join('\n') || '_none_') +
         '\n\n' +
         `## Worker reports\n\n` + run.tasks.map((t) => `### ${t.id} · ${t.title}\n\n${t.agent?.state.result || t.agent?.state.error || t.note || '_no output_'}`).join('\n\n'),
-    ].join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     const p = path.join(this.runDir, 'report.md');
     fs.writeFileSync(p, md + '\n');
     fs.writeFileSync(
@@ -563,6 +624,8 @@ export class Orchestrator extends EventEmitter {
       JSON.stringify(
         {
           goal: run.goal,
+          brief: run.brief,
+          turn: run.turn,
           phase: run.phase,
           verdict: run.verdict,
           plan: run.plan,
