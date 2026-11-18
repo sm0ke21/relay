@@ -1,0 +1,25 @@
+README.md
+  s_67cbfcbab5744d::t_c3823a78cb3d00 124
+bin/relay.js
+  s_67cbfcbab5744d::t_ceefd96f273ff9 51
+src/agent.js
+  s_67cbfcbab5744d::t_3f7a99079f6b67 176-180,291-296
+src/orchestrator.js
+  s_67cbfcbab5744d::t_9982d32785d5f8 166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1fe12e472c58442bbb390532a373c0d766d3c5dd",
+  "prompts": {},
+  "sessions": {
+    "s_67cbfcbab5744d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a68c9fbc-88b9-46ba-967e-a49f67a27191",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dimitris Kordas <dimitris@dkordas.com>"
+    }
+  }
+}
