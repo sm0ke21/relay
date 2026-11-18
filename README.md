@@ -121,7 +121,7 @@ In the TUI, `ctrl-c` aborts the run; pressing it again ends the session. Session
 | `--budget <usd>` | none | stops dispatching once spend passes this; each agent also gets `--max-budget-usd` |
 | `--permission-mode <m>` | acceptEdits | for workers |
 | `--allow <rule>` | | repeatable, e.g. `--allow "Bash(npm test:*)"`. Also gives the reviewer Bash |
-| `--yolo` | off | bypassPermissions for workers (sandboxes only) |
+| `--yolo` | off | workers skip all permission checks (`--dangerously-skip-permissions`; sandboxes only) |
 | `--inherit-mcp` | off | agents load your MCP servers (by default they are isolated, which is faster) |
 | `--mcp-config <file>` | | repeatable; gives workers the MCP servers in this JSON file (`{"mcpServers": {...}}`), with their tools allowed |
 | `-C, --cwd`, `--out`, `--keep-sessions`, `--plain`, `--mock` | | |

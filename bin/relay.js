@@ -48,7 +48,7 @@ limits
 permissions (workers)
   --permission-mode <m>    claude permission mode        (default: acceptEdits)
   --allow <rule>           extra allowed tool rule, repeatable, e.g. --allow "Bash(npm test:*)"
-  --yolo                   bypassPermissions for workers (sandboxes only!)
+  --yolo                   workers skip all permission checks (sandboxes only!)
   --inherit-mcp            let agents load your MCP servers (default: isolated)
   --mcp-config <file>      give workers the MCP servers in this JSON file (repeatable);
                            their tools are allowed automatically

@@ -163,6 +163,7 @@ export class Orchestrator extends EventEmitter {
     if (Number.isFinite(left)) base.budget = Math.max(0.01, left);
     const a = this.o.mock ? new MockAgent({ ...base, ...o }) : new Agent({ ...base, ...o });
     a.on('change', () => this.changed());
+    a.on('warn', (msg) => this.log(a.id, 'red', msg));
     this.agents.push(a);
     return a;
   }

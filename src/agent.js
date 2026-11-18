@@ -173,7 +173,11 @@ export class Agent extends EventEmitter {
     if (o.effort) a.push('--effort', o.effort);
     if (o.schema) a.push('--json-schema', JSON.stringify(o.schema));
     if (o.tools) a.push('--tools', o.tools.join(','));
-    if (o.permissionMode) a.push('--permission-mode', o.permissionMode);
+    // bypassPermissions has to be unlocked explicitly: --permission-mode alone
+    // is not enough, and with --permission-prompts none every tool call that
+    // would have prompted is denied.
+    if (o.permissionMode === 'bypassPermissions') a.push('--dangerously-skip-permissions');
+    else if (o.permissionMode) a.push('--permission-mode', o.permissionMode);
     if (o.mcpConfig) a.push('--mcp-config', JSON.stringify(o.mcpConfig));
     if (o.strictMcp) a.push('--strict-mcp-config');
     if (o.systemAppend) a.push('--append-system-prompt', o.systemAppend);
@@ -284,6 +288,12 @@ export class Agent extends EventEmitter {
         if (ev.subtype === 'init') {
           if (ev.model) st.model = ev.model;
           st.sessionId = ev.session_id || '';
+          const want = this.o.permissionMode;
+          if (want && ev.permissionMode && ev.permissionMode !== want) {
+            const msg = `claude started in permission mode "${ev.permissionMode}", not "${want}": tool calls that need approval will be denied`;
+            this.push('error', msg);
+            this.emit('warn', msg);
+          }
         }
         break;
       case 'assistant': {
